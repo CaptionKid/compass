@@ -34,11 +34,18 @@ import java.util.concurrent.TimeUnit;
 @ConditionalOnProperty(prefix = "scheduler.sparkMeta", name = "enable", havingValue = "true")
 public class SparkMetaScheduler {
 
+    /**
+     * spark分布式锁，在 {@link com.oppo.cloud.meta.config.ZookeeperLockConfig} 中注入生成
+     */
     @Resource(name = "sparkMetaLock")
     private InterProcessMutex lock;
+    /**
+     * Spark history任务元数据获取service，在 {@link com.oppo.cloud.meta.service.impl.SparkMetaServiceImpl} 中注入生成
+     */
     @Resource(name = "SparkMetaServiceImpl")
     private ITaskSyncerMetaService spark;
 
+    // @Scheduled Springboot定时任务注解，配置信息在application-hadoop.yml文件中
     @Scheduled(cron = "${scheduler.sparkMeta.cron}")
     private void run() {
         try {
@@ -51,6 +58,7 @@ public class SparkMetaScheduler {
      * zk锁，防止多实例同时同步数据
      */
     private void lock() throws Exception {
+        // 获取锁失败就返回
         if (!lock.acquire(1, TimeUnit.SECONDS)) {
             log.warn("cannot get {}", lock.getParticipantNodes());
             return;

@@ -22,7 +22,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * hadoop config
+ * hadoop config，通过@ConfigurationProperties注解加载application-hadoop.yml中的参数
  */
 @Configuration
 @ConfigurationProperties(prefix = "hadoop")

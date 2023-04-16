@@ -51,6 +51,9 @@ public class ClusterConfigServiceImpl implements IClusterConfigService {
     @Resource
     private HadoopConfig config;
 
+    /**
+     * http请求类，在 {@link com.oppo.cloud.meta.utils.RestTemplateUtil} 中注入
+     */
     @Resource(name = "restTemplate")
     private RestTemplate restTemplate;
 

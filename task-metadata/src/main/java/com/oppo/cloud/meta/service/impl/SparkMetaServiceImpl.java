@@ -65,12 +65,18 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
     @Resource
     private HadoopConfig config;
 
+    /**
+     * 集群配置信息Service，实现类 {@link ClusterConfigServiceImpl}
+     */
     @Resource
     private IClusterConfigService iClusterConfigService;
 
     @Resource(name = "restTemplate")
     private RestTemplate restTemplate;
 
+    /**
+     * redis service类，通过{@link com.oppo.cloud.common.config.RedisTemplateConfig}注入
+     */
     @Resource
     private RedisService redisService;
 
@@ -80,6 +86,9 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
     @Resource
     private ObjectMapper objectMapper;
 
+    /**
+     * Elasticsearch的client类，通过{@link com.oppo.cloud.meta.config.ElasticsearchConfig}注入
+     */
     @Resource
     private RestHighLevelClient client;
 
@@ -91,16 +100,19 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
 
     @Override
     public void syncer() {
+        // 获取spark history地址列表
         List<String> clusters = iClusterConfigService.getSparkHistoryServers();
         log.info("sparkClusters:{}", clusters);
         if (clusters == null) {
             return;
         }
+        //针对每个spark history地址创建异步回调线程
         CompletableFuture[] array = new CompletableFuture[clusters.size()];
         for (int i = 0; i < clusters.size(); i++) {
             int finalI = i;
             array[i] = CompletableFuture.supplyAsync(() -> {
                 try {
+                    //拉取spark history服务中的元数据
                     pull(clusters.get(finalI));
                 } catch (Exception e) {
                     log.error(e.getMessage());
@@ -122,6 +134,10 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
         log.info("start to pull spark tasks:{}", shs);
         String eventLogDirectory;
         try {
+            /**
+             * 通过传入spark history的 localhost:port 字符串
+             * 返回该spark history存储eventlog的hdfs目录地址
+             */
             eventLogDirectory = getEventLogDirectory(shs);
         } catch (Exception e) {
             log.error("sparkMetaErr:eventLogDirectory:{},{}", shs, e.getMessage());
@@ -131,7 +147,10 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
             log.info("sparkMetaErr:eventLogDirectory:{}", shs);
             return;
         }
-
+        /**
+         * 通过spark monitor地址api/v1/applications 获取每个spark任务对元数据信息
+         * 封装进SparkApplication对象中
+         */
         List<SparkApplication> apps = sparkRequest(shs);
         if (apps == null || apps.size() == 0) {
             log.error("sparkMetaErr:appsNull:{}", shs);
@@ -140,6 +159,10 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
         log.info("sparkApps:{},{}", shs, apps.size());
         Map<String, Map<String, Object>> sparkAppMap = new HashMap<>();
 
+        /**
+         * 这里主要是将SparkApplication封装到sparkAppMap中
+         * 方便写入Elasticsearch
+         */
         for (SparkApplication info : apps) {
             if (info.getAttempts() == null || info.getAttempts().size() == 0) {
                 log.error("sparkHistoryInfoAttemptSizeZero {},{}", shs, info);
@@ -156,6 +179,12 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
             }
         }
 
+        /**
+         * 将Spark信息写入Elasticsearch中
+         * es index: compass-spark-app-拼接yyyy-MM-dd 格式
+         * es document id: spark history地址_spark applicationId
+         * es doucment source: appId、eventLogDirectory等基础信息
+         */
         BulkResponse response;
         try {
             response = BulkApi.bulkByIds(client, sparkAppPrefix + DateUtil.getDay(0), sparkAppMap);
@@ -178,6 +207,7 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
      * spark 任务获取
      */
     public List<SparkApplication> sparkRequest(String shs) {
+        // 获取固定limitCount个数对SparkApplication
         String url = String.format(SPARK_APPS_URL, shs, limitCount, DateUtil.getDay(-1));
         log.info("sparkUrl:{}", url);
         ResponseEntity<String> responseEntity = null;
@@ -193,6 +223,7 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
         }
         List<SparkApplication> value;
         try {
+            //　返回的是json字符串，直接解析到对象中
             value = objectMapper.readValue(responseEntity.getBody(),
                     TypeFactory.defaultInstance().constructCollectionType(List.class, SparkApplication.class));
         } catch (JsonProcessingException e) {
@@ -206,6 +237,10 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
      * 获取SparkHistoryServer Event log directory: hdfs://ip:port/spark/
      */
     public String getEventLogDirectory(String ip) throws Exception {
+        /**
+         * 先从redis缓存中获取，获取到直接返回
+         * redis key为 spark:event:log:directory:{spark histroy的ip:port}
+         */
         String key = Constant.SPARK_EVENT_LOG_DIRECTORY + ip;
         String cacheResult = (String) redisService.get(key);
         if (StringUtils.isNotBlank(cacheResult)) {
@@ -214,6 +249,7 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
         }
         ResponseEntity<String> responseEntity;
         try {
+            // 访问history url地址，响应的是一个html文本
             responseEntity = restTemplate.getForEntity(String.format(SPARK_HOME_URL, ip),
                     String.class);
         } catch (Exception e) {
@@ -221,11 +257,14 @@ public class SparkMetaServiceImpl implements ITaskSyncerMetaService {
             return "";
         }
         if (responseEntity.getBody() != null) {
+            //对返回对html进行正则表达式匹配
             Matcher m = hdfsPattern.matcher(responseEntity.getBody());
             if (m.matches()) {
+                // 获取spark event log存放对hdfs目录
                 String path = m.group("hdfs");
                 if (StringUtils.isNotBlank(path)) {
                     log.info("cacheEventLogDirectory:{},{}", key, path);
+                    //　event log目录放入redis缓存
                     redisService.set(key, path, Constant.DAY_SECONDS);
                 }
                 return path;
