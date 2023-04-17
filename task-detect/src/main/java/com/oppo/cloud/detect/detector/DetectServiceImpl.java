@@ -104,6 +104,7 @@ public abstract class DetectServiceImpl implements DetectService {
         // 引擎维度诊断必须要有appId
         if (abnormalTaskAppInfo.getTaskAppList().size() != 0) {
             // 生成解析日志消息体logRecord
+            // 根据每个taskApplication的cpu、内存资源，累加求和为该taskInstance的资源
             abnormalJobService.updateResource(detectJobAnalysis, abnormalTaskAppInfo.getTaskAppList());
             LogRecord logRecord = this.genLogRecord(abnormalTaskAppInfo, detectJobAnalysis);
             this.sendLogRecordMsg(logRecord);

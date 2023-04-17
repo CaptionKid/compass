@@ -50,6 +50,10 @@ public class DetectedTask {
 
     @Value("${custom.schedulerType}")
     private String schedulerType;
+    /**
+     * 任务检测抽象接口，目前有6个具体实现类，通过@Order注解控制加载属性
+     * 顺序：执行失败检测、运行耗时异常检测、结束时间检测、长期失败检测、（运行耗时长检测、任务首次失败检测）
+     */
     @Resource
     private List<DetectService> abnormalDetects;
 
@@ -64,6 +68,10 @@ public class DetectedTask {
 
     @KafkaListener(topics = "${custom.kafka.consumer.topic-name}", groupId = "${custom.kafka.consumer.group-id}", autoStartup = "${custom.kafka.consumer.auto.start}")
     public void consumerTask(@Payload List<String> tableChangeMessages, Acknowledgment ack) {
+        /**
+         * 这里从Kafka topic（task-instance）中获取的是关于调度引擎 taskIstance元数据
+         * 调度引擎的元数据分为： user -> project -> flow -> task -> task_instance
+         */
         for (String message : tableChangeMessages) {
             // 过滤非最终状态任务数据
             if (preFilter(message)) {
@@ -83,6 +91,10 @@ public class DetectedTask {
                             tableMessage.getBody());
                     continue;
                 }
+                /**
+                 * 判断该taskInstance是否真正结束
+                 * 结束以后对该taskInstance进行诊断
+                 */
                 if (judgeTaskFinished(taskInstance)) {
                     detectExecutorPool.execute(() -> detectTask(taskInstance));
                 }
@@ -143,6 +155,9 @@ public class DetectedTask {
             log.info("find blocklist task, taskInstance:{}", taskInstance);
             return;
         }
+        /**
+         * 用来记录所有执行不正常的任务，最终写入Elasticsearch
+         */
         JobAnalysis jobAnalysis = new JobAnalysis();
         TaskInstance taskInstanceSum;
         if ("manual".equals(taskInstance.getTriggerType())) {
@@ -169,12 +184,19 @@ public class DetectedTask {
         // 异常任务检测
         for (DetectService detectService : abnormalDetects) {
             try {
+                /**
+                 * 这里如果检测出符合检测异常，会把相应的检测类型写入jobAnalysis的Categories中
+                 */
                 detectService.detect(jobAnalysis);
             } catch (Exception e) {
                 log.error("detect task failed: ", e);
             }
         }
 
+        /**
+         * 对检测完成对taskInstance补全信息
+         * 在这个过程中会补全spark、yarn的元数据信息，使调度任务实例（taskInstance）和具体的spark、yarn任务进行关联
+         */
         try {
             if (jobAnalysis.getCategories().size() == 0) {
                 // 正常作业任务处理

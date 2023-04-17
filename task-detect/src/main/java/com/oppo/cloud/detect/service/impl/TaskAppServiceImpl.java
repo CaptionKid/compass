@@ -77,6 +77,7 @@ public class TaskAppServiceImpl implements TaskAppService {
         // 本次新处理的taskApps
         StringBuilder handledAppsNew = new StringBuilder();
         // 判断任务每次重试的appId是否已经找到
+        // key:每一次重试序号，重试三次，分别有0、1、2三个key写入map
         Map<Integer, Boolean> needed = new HashMap<>();
         for (int i = 0; i <= jobAnalysis.getRetryTimes(); i++) {
             needed.put(i, false);
